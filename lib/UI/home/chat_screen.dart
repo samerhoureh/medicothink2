@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'chat_drawer.dart';
 
 const Color kTeal = Color(0xFF20A9C3);
@@ -23,17 +25,46 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<_Message> _messages = [
     _Message(text: 'Hi', isMe: true),
-    _Message(text: 'Hello', isMe: false),
+    _Message(text: 'Hello! How can I assist you with your medical questions today?', isMe: false),
   ];
 
   bool _isTyping = false;
 
   void _scrollToBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_scrollCtrl.hasClients)
+    if (_scrollCtrl.hasClients) {
       _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+    }
   });
 
-  void _sendMessage() {
+  Future<String> _getAIResponse(String message) async {
+    final url = Uri.parse('YOUR_API_ENDPOINT');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer YOUR_API_KEY',
+        },
+        body: jsonEncode({
+          'messages': [
+            {'role': 'user', 'content': message}
+          ],
+          'model': 'gpt-3.5-turbo',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['choices'][0]['message']['content'];
+      } else {
+        return 'Sorry, I encountered an error. Please try again.';
+      }
+    } catch (e) {
+      return 'Sorry, I encountered an error. Please try again.';
+    }
+  }
+
+  void _sendMessage() async {
     final txt = _textCtrl.text.trim();
     if (txt.isEmpty) return;
 
@@ -44,13 +75,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _textCtrl.clear();
     _scrollToBottom();
 
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      setState(() {
-        _isTyping = false;
-        _messages.add(_Message(text: 'Static reply', isMe: false));
-      });
-      _scrollToBottom();
+    // Get AI response
+    final aiResponse = await _getAIResponse(txt);
+    
+    setState(() {
+      _isTyping = false;
+      _messages.add(_Message(text: aiResponse, isMe: false));
     });
+    _scrollToBottom();
   }
 
   @override
@@ -61,7 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
         key: _scaffoldKey,
         backgroundColor: Colors.white,
         drawer: const ChatDrawer(),
-         onDrawerChanged: (isOpen) {
+        onDrawerChanged: (isOpen) {
           if (!isOpen) FocusScope.of(context).unfocus();
         },
         appBar: AppBar(
@@ -141,7 +173,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   index -= _messages.length;
 
                   if (_isTyping && index == 0) {
-                    return const _TypingLabel(name: 'Sabrina');
+                    return const _TypingLabel(name: 'AI Assistant');
                   }
 
                   return const SizedBox.shrink();
@@ -268,27 +300,26 @@ class _MessageInput extends StatelessWidget {
             width: 50,
             height: 50,
             child: ValueListenableBuilder<TextEditingValue>(
-  valueListenable: controller,
-  builder: (_, value, __) {
-    final hasText = value.text.trim().isNotEmpty;
-    return SizedBox(
-      width: 50,
-      height: 50,
-      child: FloatingActionButton(
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
-        backgroundColor: Colors.black,
-        onPressed: hasText ? onSend : null,        
-        child: Icon(
-          hasText ? Icons.send : Icons.add,         
-          size: 28,
-          color: Colors.white,
-        ),
-      ),
-    );
-  },
-),
-
+              valueListenable: controller,
+              builder: (_, value, __) {
+                final hasText = value.text.trim().isNotEmpty;
+                return SizedBox(
+                  width: 50,
+                  height: 50,
+                  child: FloatingActionButton(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                    backgroundColor: Colors.black,
+                    onPressed: hasText ? onSend : null,        
+                    child: Icon(
+                      hasText ? Icons.send : Icons.add,         
+                      size: 28,
+                      color: Colors.white,
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
