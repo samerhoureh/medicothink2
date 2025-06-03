@@ -1,15 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'chat_drawer.dart';
-
-const Color kTeal = Color(0xFF20A9C3);
-
-class _Message {
-  final String text;
-  final bool isMe;
-  _Message({required this.text, required this.isMe});
-}
+import 'package:record/record.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import '../../models/chat_message.dart';
+import '../../services/notification_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -19,310 +14,363 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _textCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
-
-  final List<_Message> _messages = [
-    _Message(text: 'Hi', isMe: true),
-    _Message(text: 'Hello! How can I assist you with your medical questions today?', isMe: false),
-  ];
-
+  final Record _audioRecorder = Record();
+  final ImagePicker _imagePicker = ImagePicker();
+  
+  List<ChatMessage> _messages = [];
+  bool _isRecording = false;
+  String? _currentRecordingPath;
   bool _isTyping = false;
 
-  void _scrollToBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_scrollCtrl.hasClients) {
-      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-    }
-  });
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissions();
+  }
 
-  Future<String> _getAIResponse(String message) async {
-    final url = Uri.parse('YOUR_API_ENDPOINT');
+  Future<void> _requestPermissions() async {
+    await _audioRecorder.hasPermission();
+    // Add other permission requests as needed
+  }
+
+  Future<void> _startRecording() async {
     try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY',
-        },
-        body: jsonEncode({
-          'messages': [
-            {'role': 'user', 'content': message}
-          ],
-          'model': 'gpt-3.5-turbo',
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['choices'][0]['message']['content'];
-      } else {
-        return 'Sorry, I encountered an error. Please try again.';
+      if (await _audioRecorder.hasPermission()) {
+        final directory = await getTemporaryDirectory();
+        _currentRecordingPath = '${directory.path}/audio_message_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        await _audioRecorder.start(path: _currentRecordingPath);
+        setState(() => _isRecording = true);
       }
     } catch (e) {
-      return 'Sorry, I encountered an error. Please try again.';
+      print('Error starting recording: $e');
     }
   }
 
-  void _sendMessage() async {
-    final txt = _textCtrl.text.trim();
-    if (txt.isEmpty) return;
-
-    setState(() {
-      _messages.add(_Message(text: txt, isMe: true));
-      _isTyping = true;
-    });
-    _textCtrl.clear();
-    _scrollToBottom();
-
-    // Get AI response
-    final aiResponse = await _getAIResponse(txt);
-    
-    setState(() {
-      _isTyping = false;
-      _messages.add(_Message(text: aiResponse, isMe: false));
-    });
-    _scrollToBottom();
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _audioRecorder.stop();
+      setState(() => _isRecording = false);
+      
+      if (path != null) {
+        // Here you would typically upload the file and get a URL
+        _addMessage(
+          ChatMessage(
+            id: DateTime.now().toString(),
+            content: 'Voice Message',
+            isMe: true,
+            type: MessageType.voice,
+            timestamp: DateTime.now(),
+            mediaUrl: path,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error stopping recording: $e');
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: Scaffold(
-        key: _scaffoldKey,
-        backgroundColor: Colors.white,
-        drawer: const ChatDrawer(),
-        onDrawerChanged: (isOpen) {
-          if (!isOpen) FocusScope.of(context).unfocus();
-        },
-        appBar: AppBar(
-          scrolledUnderElevation: 0,
-          surfaceTintColor: Colors.transparent,
-          leadingWidth: 90,
-          toolbarHeight: 80,
-          backgroundColor: Colors.white,
-          elevation: 0,
-          leading: Builder(
-            builder: (context) => Padding(
-              padding: const EdgeInsets.only(
-                left: 30,
-                top: 20,
-                bottom: 20,
-                right: 20,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.menu, color: kTeal),
-                  onPressed: () {
-                    FocusScope.of(context).unfocus();
-                    Scaffold.of(context).openDrawer();
-                  },
-                ),
-              ),
-            ),
+  Future<void> _pickImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
+        // Here you would typically upload the file and get a URL
+        _addMessage(
+          ChatMessage(
+            id: DateTime.now().toString(),
+            content: 'Image Message',
+            isMe: true,
+            type: MessageType.image,
+            timestamp: DateTime.now(),
+            mediaUrl: image.path,
           ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 16.0),
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                onPressed: () {},
-                child: const Text('End conversation'),
-              ),
-            ),
-          ],
-        ),
-        body: Column(
+        );
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+    }
+  }
+
+  Future<void> _showReminderDialog() async {
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+
+    if (pickedDate != null) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+      );
+
+      if (pickedTime != null) {
+        final DateTime reminderDateTime = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          pickedTime.hour,
+          pickedTime.minute,
+        );
+
+        // Show dialog for reminder details
+        _showReminderDetailsDialog(reminderDateTime);
+      }
+    }
+  }
+
+  void _showReminderDetailsDialog(DateTime dateTime) {
+    final titleController = TextEditingController();
+    final descriptionController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Set Reminder'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollCtrl,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                itemCount: _messages.length + (_isTyping ? 1 : 0) + 1,
-                itemBuilder: (_, i) {
-                  if (i == 0) return const _DateLabel(label: 'Today');
-
-                  int index = i - 1;
-
-                  if (index < _messages.length) {
-                    final msg = _messages[index];
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _ChatBubble(isMe: msg.isMe, text: msg.text),
-                        if (msg.isMe) const _SeenLabel(),
-                      ],
-                    );
-                  }
-
-                  index -= _messages.length;
-
-                  if (_isTyping && index == 0) {
-                    return const _TypingLabel(name: 'AI Assistant');
-                  }
-
-                  return const SizedBox.shrink();
-                },
-              ),
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(labelText: 'Title'),
             ),
-            _MessageInput(controller: _textCtrl, onSend: _sendMessage),
+            TextField(
+              controller: descriptionController,
+              decoration: const InputDecoration(labelText: 'Description'),
+              maxLines: 3,
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ChatBubble extends StatelessWidget {
-  final bool isMe;
-  final String text;
-  const _ChatBubble({required this.isMe, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = isMe ? kTeal : const Color.fromARGB(255, 227, 242, 241);
-    final align = isMe ? Alignment.centerRight : Alignment.centerLeft;
-    final txtColor = isMe ? Colors.white : Colors.black87;
-
-    return Align(
-      alignment: align,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isMe ? 12 : 0),
-            bottomRight: Radius.circular(isMe ? 0 : 12),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
-        ),
-        child: Text(text, style: TextStyle(color: txtColor)),
-      ),
-    );
-  }
-}
-
-class _DateLabel extends StatelessWidget {
-  final String label;
-  const _DateLabel({required this.label});
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Text(label, style: const TextStyle(color: Color.fromARGB(255, 158, 158, 158))),
-    ),
-  );
-}
-
-class _SeenLabel extends StatelessWidget {
-  const _SeenLabel();
-  @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.only(right: 8.0, top: 2, bottom: 8),
-    child: Align(
-      alignment: Alignment.centerRight,
-      child: Text('Seen', style: TextStyle(color: Colors.grey, fontSize: 12)),
-    ),
-  );
-}
-
-class _TypingLabel extends StatelessWidget {
-  final String name;
-  const _TypingLabel({required this.name});
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 8),
-    child: Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        '$name is typing...',
-        style: const TextStyle(color: Colors.grey, fontSize: 12),
-      ),
-    ),
-  );
-}
-
-class _MessageInput extends StatelessWidget {
-  final TextEditingController controller;
-  final VoidCallback onSend;
-  const _MessageInput({required this.controller, required this.onSend});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.transparent,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                hintText: 'Type something...',
-                hintStyle: TextStyle(color: Color.fromARGB(255, 209, 209, 209)),
-                prefixIcon: const Icon(
-                  Icons.circle,
-                  color: Color.fromARGB(255, 209, 209, 209),
+          TextButton(
+            onPressed: () {
+              final reminder = ReminderData(
+                title: titleController.text,
+                description: descriptionController.text,
+                dateTime: dateTime,
+              );
+              
+              NotificationService.instance.scheduleReminder(reminder);
+              
+              _addMessage(
+                ChatMessage(
+                  id: DateTime.now().toString(),
+                  content: 'Reminder: ${reminder.title}',
+                  isMe: true,
+                  type: MessageType.reminder,
+                  timestamp: DateTime.now(),
+                  reminder: reminder,
                 ),
-                filled: true,
-                fillColor: const Color(0xFFF0F0F0),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              onSubmitted: (_) => onSend(),
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 50,
-            height: 50,
-            child: ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (_, value, __) {
-                final hasText = value.text.trim().isNotEmpty;
-                return SizedBox(
-                  width: 50,
-                  height: 50,
-                  child: FloatingActionButton(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
-                    backgroundColor: Colors.black,
-                    onPressed: hasText ? onSend : null,        
-                    child: Icon(
-                      hasText ? Icons.send : Icons.add,         
-                      size: 28,
-                      color: Colors.white,
-                    ),
-                  ),
-                );
-              },
-            ),
+              );
+              
+              Navigator.pop(context);
+            },
+            child: const Text('Set'),
           ),
         ],
       ),
+    );
+  }
+
+  void _addMessage(ChatMessage message) {
+    setState(() {
+      _messages.add(message);
+    });
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Medical Assistant'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: _showReminderDialog,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollCtrl,
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                return _MessageBubble(message: msg);
+              },
+            ),
+          ),
+          _buildInputArea(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+            onPressed: _isRecording ? _stopRecording : _startRecording,
+          ),
+          IconButton(
+            icon: const Icon(Icons.image),
+            onPressed: _pickImage,
+          ),
+          Expanded(
+            child: TextField(
+              controller: _textCtrl,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.send),
+            onPressed: _sendMessage,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendMessage() {
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    _addMessage(
+      ChatMessage(
+        id: DateTime.now().toString(),
+        content: text,
+        isMe: true,
+        type: MessageType.text,
+        timestamp: DateTime.now(),
+      ),
+    );
+    _textCtrl.clear();
+  }
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    _scrollCtrl.dispose();
+    _audioRecorder.dispose();
+    super.dispose();
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  final ChatMessage message;
+
+  const _MessageBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: message.isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: message.isMe ? kTeal : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: _buildMessageContent(),
+      ),
+    );
+  }
+
+  Widget _buildMessageContent() {
+    switch (message.type) {
+      case MessageType.voice:
+        return _buildVoiceMessage();
+      case MessageType.image:
+        return _buildImageMessage();
+      case MessageType.reminder:
+        return _buildReminderMessage();
+      default:
+        return Text(
+          message.content,
+          style: TextStyle(
+            color: message.isMe ? Colors.white : Colors.black87,
+          ),
+        );
+    }
+  }
+
+  Widget _buildVoiceMessage() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.play_arrow),
+          onPressed: () {
+            // Implement audio playback
+          },
+        ),
+        const SizedBox(width: 8),
+        const Text('Voice Message'),
+      ],
+    );
+  }
+
+  Widget _buildImageMessage() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (message.mediaUrl != null)
+          Image.file(
+            File(message.mediaUrl!),
+            height: 200,
+            width: 200,
+            fit: BoxFit.cover,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildReminderMessage() {
+    final reminder = message.reminder;
+    if (reminder == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          reminder.title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        Text(reminder.description),
+        Text(
+          'Scheduled for: ${reminder.dateTime.toString()}',
+          style: const TextStyle(fontSize: 12),
+        ),
+      ],
     );
   }
 }
